@@ -29,6 +29,10 @@
 StochasticForcing Forcing;
 void MHDCTSetupFieldLabels();
 
+float GetMagneticUnits(float DensityUnits, float LengthUnits, float TimeUnits);
+int GetUnits(float *DensityUnits, float *LengthUnits,
+       float *TemperatureUnits, float *TimeUnits,
+       float *VelocityUnits, double *MassUnits, FLOAT Time);
 int DrivenFlowInitialize(FILE *fptr, FILE *Outfptr, 
              HierarchyEntry &TopGrid, TopGridData &MetaData, 
              int SetBaryonFields)
@@ -65,6 +69,7 @@ int DrivenFlowInitialize(FILE *fptr, FILE *Outfptr,
 
   float DrivenFlowDensity     = 1.0; // initial mass density
   float DrivenFlowPressure    = 1.0; // initial pressure
+  float DrivenFlowTemperatureKelvin = -1.0; 
 
   float DrivenFlowMagField           = 0.0; // initial magnetic field
 
@@ -76,6 +81,11 @@ int DrivenFlowInitialize(FILE *fptr, FILE *Outfptr,
   /* read input from file */
   if (debug) printf("DrivenFlowInitialize: reading problem-specific parameters.\n");
 
+  float DensityUnits, LengthUnits, TemperatureUnits, TimeUnits, VelocityUnits;
+  double MassUnits;
+  GetUnits(&DensityUnits, &LengthUnits,&TemperatureUnits, &TimeUnits,
+               &VelocityUnits, &MassUnits, MetaData.Time); 
+  float MagneticUnits = GetMagneticUnits(DensityUnits, LengthUnits, TimeUnits);
   while (fgets(line, MAX_LINE_LENGTH, fptr) != NULL) {
 
     ret = 0;
@@ -102,12 +112,18 @@ int DrivenFlowInitialize(FILE *fptr, FILE *Outfptr,
     ret += sscanf(line, "DrivenFlowDensity = %"FSYM, &DrivenFlowDensity);
     ret += sscanf(line, "DrivenFlowPressure = %"FSYM, &DrivenFlowPressure);
     ret += sscanf(line, "DrivenFlowMagField = %"FSYM, &DrivenFlowMagField);
-
+    ret += sscanf(line, "DrivenFlowTemperatureKelvin = %"FSYM, &DrivenFlowTemperatureKelvin); 
     /* if the line is suspicious, issue a warning */
 
     if (ret == 0 && strstr(line, "=") && strstr(line, "DrivenFlow"))
       fprintf(stderr, "warning: the following parameter line was not interpreted:\n%s\n", line);
 
+  }
+
+  if( DrivenFlowTemperatureKelvin > 0.0 ){
+      DrivenFlowPressure = DrivenFlowTemperatureKelvin/TemperatureUnits * DrivenFlowDensity;
+      fprintf(stderr,"CLOWN temperatureUnits %f\n",TemperatureUnits);
+      fprintf(stderr,"CLOWN Pressure %f\n",DrivenFlowPressure);
   }
 
 
@@ -124,16 +140,6 @@ int DrivenFlowInitialize(FILE *fptr, FILE *Outfptr,
     return FALSE;
   }
 
-  if (SelfGravity) {
-      fprintf(stderr,"DrivenFlowInitialize: SelfGravity untested at this point.\n");
-      return FALSE;
-  }
-
-  if ((HydroMethod != MHD_RK) && (HydroMethod != HD_RK) && (HydroMethod != MHD_Li)) {
-      fprintf(stderr,"DrivenFlowInitialize: Only support for MUSCL framework and MHDCT at this point.\n");
-      return FALSE;
-  }
-
   if (MetaData.TopGridRank != 3) {
       fprintf(stderr,"DrivenFlowInitialize: Only 3D tested at this point.\n");
       return FALSE;
@@ -141,7 +147,8 @@ int DrivenFlowInitialize(FILE *fptr, FILE *Outfptr,
 
 
   // set proper internal unit for magnetic field
-  DrivenFlowMagField /= sqrt(4*pi);
+  //DrivenFlowMagField /= sqrt(4*pi);  If other units are unity, this is merely sqrt(4pi)
+  DrivenFlowMagField /= MagneticUnits;
   
   /* compute characteristic velocity from speed of sound and Mach numbers */
 
